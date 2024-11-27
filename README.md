@@ -1,137 +1,105 @@
-from flask import Flask, render_template_string, request
-import yt_dlp
-import os
+from flask import Flask, request, redirect, url_for, render_template_string, session
 
 app = Flask(__name__)
+app.secret_key = "clave_secreta"  # Clave para sesiones
 
-# Carpeta de salida para los archivos descargados
-output_dir = "descargas"
-os.makedirs(output_dir, exist_ok=True)
+# Simulando base de datos en memoria
+users = {"admin": "1234"}  # Usuarios: {usuario: contraseña}
+posts = []  # Lista de publicaciones
+friends = ["Alice", "Bob", "Charlie"]  # Lista de amigos
 
-# Plantilla HTML directamente en el archivo
-html_template = """
+# Plantilla básica embebida
+template = """
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Descargar Música y Videos</title>
+    <title>{{ title }}</title>
     <style>
-        body {
-            background-color: black;
-            color: white;
-            font-family: Arial, sans-serif;
-        }
-        h1 {
-            text-align: center;
-        }
-        .container {
-            width: 50%;
-            margin: 0 auto;
-            padding-top: 50px;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        input[type="text"], select {
-            width: 100%;
-            padding: 10px;
-            margin-top: 5px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-        }
-        button {
-            background-color: #1DB954;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            cursor: pointer;
-            border-radius: 5px;
-        }
-        button:hover {
-            background-color: #1ed760;
-        }
-        .error {
-            color: red;
-            text-align: center;
-        }
-        .success {
-            color: green;
-            text-align: center;
-        }
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 600px; margin: auto; }
+        .post { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+        .friends { background-color: #f9f9f9; padding: 10px; margin: 10px 0; }
+        textarea, input { width: 100%; margin-bottom: 10px; }
     </style>
 </head>
 <body>
-
     <div class="container">
-        <h1>🎶 Descarga Música y Videos 📹</h1>
-
-        {% if error %}
-        <p class="error">{{ error }}</p>
-        {% endif %}
-
-        {% if success %}
-        <p class="success">{{ success }}</p>
-        {% endif %}
-
-        <form method="POST">
-            <div class="form-group">
-                <label for="url">URL del Video o Canción</label>
-                <input type="text" id="url" name="url" placeholder="Introduce la URL" required>
-            </div>
-
-            <div class="form-group">
-                <label for="tipo">Selecciona el tipo de descarga</label>
-                <select id="tipo" name="tipo">
-                    <option value="Música">Música</option>
-                    <option value="Video">Video</option>
-                </select>
-            </div>
-
-            <button type="submit">Descargar</button>
-        </form>
+        {% block content %}{% endblock %}
     </div>
-
 </body>
 </html>
 """
 
 @app.route("/", methods=["GET", "POST"])
-def index():
+def login():
     if request.method == "POST":
-        url = request.form.get("url")
-        tipo = request.form.get("tipo")
+        username = request.form.get("username")
+        password = request.form.get("password")
+        if username in users and users[username] == password:
+            session["username"] = username
+            return redirect(url_for("home"))
+        return render_template_string(template, title="Iniciar Sesión", content="Usuario o contraseña incorrectos.")
+    return render_template_string(template, title="Iniciar Sesión", content="""
+        <h1>Iniciar Sesión</h1>
+        <form method="POST">
+            <input type="text" name="username" placeholder="Usuario" required>
+            <input type="password" name="password" placeholder="Contraseña" required>
+            <button type="submit">Ingresar</button>
+        </form>
+        <p>¿No tienes cuenta? <a href="{{ url_for('register') }}">Regístrate</a></p>
+    """)
 
-        if not url.strip():
-            return render_template_string(html_template, error="Por favor, introduce una URL válida.")
-        
-        try:
-            # Opciones de yt-dlp
-            ydl_opts = {}
-            if tipo == "Música":
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '192',
-                    }],
-                }
-            elif tipo == "Video":
-                ydl_opts = {
-                    'format': 'bestvideo+bestaudio',
-                    'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
-                }
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        if username in users:
+            return render_template_string(template, title="Registro", content="El usuario ya existe.")
+        users[username] = password
+        return redirect(url_for("login"))
+    return render_template_string(template, title="Registro", content="""
+        <h1>Registro</h1>
+        <form method="POST">
+            <input type="text" name="username" placeholder="Usuario" required>
+            <input type="password" name="password" placeholder="Contraseña" required>
+            <button type="submit">Registrar</button>
+        </form>
+        <p>¿Ya tienes cuenta? <a href="{{ url_for('login') }}">Inicia sesión</a></p>
+    """)
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+@app.route("/home", methods=["GET", "POST"])
+def home():
+    if "username" not in session:
+        return redirect(url_for("login"))
+    if request.method == "POST":
+        content = request.form.get("content")
+        if content:
+            posts.append({"user": session["username"], "content": content})
+    return render_template_string(template, title="Inicio", content=f"""
+        <h1>Bienvenido, {session['username']}</h1>
+        <a href="{{ url_for('logout') }}">Cerrar sesión</a>
+        <h2>Publicar algo</h2>
+        <form method="POST">
+            <textarea name="content" placeholder="Escribe algo..."></textarea>
+            <button type="submit">Publicar</button>
+        </form>
+        <div class="friends">
+            <h3>Tus Amigos</h3>
+            <ul>
+                {''.join(f'<li>{friend}</li>' for friend in friends)}
+            </ul>
+        </div>
+        <h3>Publicaciones</h3>
+        {''.join(f'<div class="post"><b>{post["user"]}:</b> {post["content"]}</div>' for post in posts)}
+    """)
 
-            return render_template_string(html_template, success=f"{tipo} descargado con éxito en la carpeta '{output_dir}'!")
-        except Exception as e:
-            return render_template_string(html_template, error=f"Error al procesar la URL: {e}")
-    
-    return render_template_string(html_template)
+@app.route("/logout")
+def logout():
+    session.pop("username", None)
+    return redirect(url_for("login"))
 
 if __name__ == "__main__":
     app.run(debug=True)
